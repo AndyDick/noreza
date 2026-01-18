@@ -71,3 +71,34 @@ Preview
     - It is the 2nd segment of lsusb, e.g. `16d0:12f7`
 - You can pass `--wait` to have the program wait for a matching device to be connected
 - Access the web interface at localhost:1337 (port can be changed with `--port`)
+
+## Running as a Systemd Service
+
+To run noreza at boot:
+
+1. Build and install the binary:
+   ```bash
+   go build -o noreza ./cmd/noreza
+   sudo cp noreza /usr/local/bin/
+   ```
+
+2. Create the configuration file:
+   ```bash
+   sudo cp noreza.conf.example /etc/noreza.conf
+   sudo nano /etc/noreza.conf  # Set your NOREZA_SERIAL
+   ```
+
+3. Install and enable the service:
+   ```bash
+   sudo cp noreza.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now noreza
+   ```
+
+4. Check status:
+   ```bash
+   sudo systemctl status noreza
+   sudo journalctl -u noreza -f  # Follow logs
+   ```
+
+Note: The service runs without X11, so auto profile switching based on active window is disabled when running as a service.

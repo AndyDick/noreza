@@ -1,0 +1,18 @@
+[Unit]
+Description=Noreza - Azeron keypad remapper
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/noreza.conf
+ExecStart=/usr/local/bin/noreza --serial ${NOREZA_SERIAL}
+WorkingDirectory=/var/lib/noreza
+Restart=on-failure
+RestartSec=5
+
+# Required for /dev/uinput access
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,4 @@
+# Noreza configuration
+# Copy this file to /etc/noreza.conf and update with your device serial
+
+NOREZA_SERIAL=YOUR_SERIAL_HERE
