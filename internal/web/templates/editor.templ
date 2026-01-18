@@ -232,16 +232,16 @@ templ EditorModal(profile string, index uint8, mappingType, subkey, keyString, l
 						@click="addKey({ code: 'ScrollDown', mode: 1 })"
 					>Scroll Down</button>
 				</div>
-				<!-- Back/Forward buttons -->
+				<!-- Mouse 4/5 buttons -->
 				<div class="flex justify-center gap-3 mb-4">
 					<button
 						class="text-xs px-4 py-2 bg-purple-500 rounded hover:bg-purple-600"
-						@click="addKey({ code: 'Back', mode: 1 })"
-					>Back</button>
+						@click="addKey({ code: 'Mouse4', mode: 1 })"
+					>Mouse 4</button>
 					<button
 						class="text-xs px-4 py-2 bg-purple-500 rounded hover:bg-purple-600"
-						@click="addKey({ code: 'Forward', mode: 1 })"
-					>Forward</button>
+						@click="addKey({ code: 'Mouse5', mode: 1 })"
+					>Mouse 5</button>
 				</div>
 				<!-- Control buttons -->
 				<div class="flex justify-center gap-1">

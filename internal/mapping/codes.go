@@ -48,7 +48,7 @@ var KeyToCode = map[string]int{
 var MouseToCode = map[string]int{
 	"LClick": 0x110, "RClick": 0x111, "MClick": 0x112,
 	"ScrollUp": 0x001, "ScrollDown": 0x002,
-	"Back": 0x116, "Forward": 0x115,
+	"Mouse4": 0x113, "Mouse5": 0x114,
 }
 
 // Reverse map: Linux input-event code -> KeyboardEvent.code

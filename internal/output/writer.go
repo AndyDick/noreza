@@ -40,10 +40,10 @@ func (w *Writer) Apply(press, release []mapping.KeyMapping) {
 				w.mouse.MiddleRelease()
 			case 0x111:
 				w.mouse.RightRelease()
-			case 0x116: // Back
-				w.mouse.BackRelease()
-			case 0x115: // Forward
-				w.mouse.ForwardRelease()
+			case 0x113: // Mouse4 (BTN_SIDE)
+				w.mouse.ButtonRelease(0x113)
+			case 0x114: // Mouse5 (BTN_EXTRA)
+				w.mouse.ButtonRelease(0x114)
 			// Scroll wheel doesn't have release events
 			}
 		case mapping.Keyboard:
@@ -68,10 +68,10 @@ func (w *Writer) Apply(press, release []mapping.KeyMapping) {
 				if err := w.mouse.Wheel(false, -2); err != nil {
 					log.Printf("Scroll down error: %v", err)
 				}
-			case 0x116: // Back
-				w.mouse.BackPress()
-			case 0x115: // Forward
-				w.mouse.ForwardPress()
+			case 0x113: // Mouse4 (BTN_SIDE)
+				w.mouse.ButtonPress(0x113)
+			case 0x114: // Mouse5 (BTN_EXTRA)
+				w.mouse.ButtonPress(0x114)
 			}
 		case mapping.Keyboard:
 			w.keyboard.KeyDown(key.Code)
