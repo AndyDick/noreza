@@ -103,6 +103,30 @@ func RunServer(ctx context.Context, port int, store *mapping.Store, reader *inpu
 			return
 		}
 
+		// Check if this key is used as a layer activator
+		layerActivatorName := ""
+		baseType := keyType
+		if strings.HasPrefix(keyType, "layer_") {
+			parts := strings.Split(keyType, ":")
+			if len(parts) > 0 {
+				baseType = strings.TrimPrefix(parts[0], "layer_")
+			}
+		}
+		rawMappings := *store.RawMappings.Load()
+		if rawMapping, ok := rawMappings[profile]; ok {
+			for _, layer := range rawMapping.Layers {
+				if layer.Activator.Type == baseType && layer.Activator.Index == index {
+					if baseType == "hat" && layer.Activator.Direction == subKey {
+						layerActivatorName = layer.Name
+						break
+					} else if baseType == "button" {
+						layerActivatorName = layer.Name
+						break
+					}
+				}
+			}
+		}
+
 		clientKeys := make([]rawMapping, 0)
 		existingKeys := keyMap.GetKeys(keyType, subKey, index)
 		for _, key := range existingKeys {
@@ -125,7 +149,7 @@ func RunServer(ctx context.Context, port int, store *mapping.Store, reader *inpu
 		}
 
 		keyString, _ := templ.JSONString(clientKeys)
-		templates.EditorModal(profile, index, keyType, subKey, keyString).Render(r.Context(), w)
+		templates.EditorModal(profile, index, keyType, subKey, keyString, layerActivatorName).Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("PATCH /profiles/{profile}/update", func(w http.ResponseWriter, r *http.Request) {
@@ -201,14 +225,22 @@ func RunServer(ctx context.Context, port int, store *mapping.Store, reader *inpu
 			return
 		}
 
+		// Preserve layer mode state
+		layerMode := r.PostFormValue("layerMode") == "true"
+		selectedLayer := r.PostFormValue("selectedLayer")
+
 		metadata := *store.Metadata.Load()
-		templates.Editor(*m, profile, device, metadata).Render(r.Context(), w)
+		templates.Editor(*m, profile, device, metadata, layerMode, selectedLayer).Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("GET /profiles/{profile}/editor", func(w http.ResponseWriter, r *http.Request) {
 		profile := r.PathValue("profile")
 		mappings := *store.RawMappings.Load()
-		m := mappings[profile]
+		m, ok := mappings[profile]
+		if !ok {
+			http.Error(w, "profile not found", http.StatusNotFound)
+			return
+		}
 
 		device, err := mapping.GetDeviceFromID(store.ProductID)
 		if err != nil {
@@ -221,7 +253,7 @@ func RunServer(ctx context.Context, port int, store *mapping.Store, reader *inpu
 		})
 
 		metadata := *store.Metadata.Load()
-		templates.Editor(*m, profile, device, metadata).Render(r.Context(), w)
+		templates.Editor(*m, profile, device, metadata, false, "").Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("PATCH /profiles/{profile}/clear", func(w http.ResponseWriter, r *http.Request) {
@@ -261,16 +293,21 @@ func RunServer(ctx context.Context, port int, store *mapping.Store, reader *inpu
 		}
 
 		metadata := *store.Metadata.Load()
-		templates.Editor(*m, profile, device, metadata).Render(r.Context(), w)
+		templates.Editor(*m, profile, device, metadata, false, "").Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("GET /profiles/{profile}/settings", func(w http.ResponseWriter, r *http.Request) {
 		profile := r.PathValue("profile")
 
 		mappings := *store.RawMappings.Load()
-		windowProfile := mappings[profile].WindowProfile
+		m := mappings[profile]
+		windowProfile := m.WindowProfile
+		layers := m.Layers
+		if layers == nil {
+			layers = make([]mapping.LayerMapping, 0)
+		}
 
-		templates.SettingsModal(profile, mappings[profile].AxisDeadzone, windowProfile).Render(r.Context(), w)
+		templates.SettingsModal(profile, m.AxisDeadzone, windowProfile, layers).Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("PATCH /profiles/{profile}/settings/update", func(w http.ResponseWriter, r *http.Request) {
@@ -295,8 +332,20 @@ func RunServer(ctx context.Context, port int, store *mapping.Store, reader *inpu
 
 		m.WindowProfile.NamePattern = namePattern
 		m.WindowProfile.ClassPattern = classPattern
-
 		m.AxisDeadzone = int16(deadzone)
+
+		// Recompile FlatMapping
+		flat := mapping.CompileFlatMapping(*m)
+		maps := store.Mappings.Load()
+		if maps != nil {
+			(*maps)[profile] = flat
+			store.Mappings.Store(maps)
+		}
+
+		// Update activeMapping if needed
+		if store.ActiveProfile.Load() == profile {
+			store.ActiveMapping.Store(flat)
+		}
 
 		path := filepath.Join(store.ProfilePath, profile+".json")
 		if err := m.WriteToFile(path); err != nil {
@@ -305,6 +354,159 @@ func RunServer(ctx context.Context, port int, store *mapping.Store, reader *inpu
 		}
 
 		w.WriteHeader(http.StatusNoContent)
+	})
+
+	mux.HandleFunc("POST /profiles/{profile}/layers", func(w http.ResponseWriter, r *http.Request) {
+		profile := r.PathValue("profile")
+
+		mappings := *store.RawMappings.Load()
+		m, ok := mappings[profile]
+		if !ok {
+			http.Error(w, "profile not found", http.StatusNotFound)
+			return
+		}
+
+		if m.Layers == nil {
+			m.Layers = make([]mapping.LayerMapping, 0)
+		}
+
+		// Add new layer
+		newLayer := mapping.LayerMapping{
+			Name:      fmt.Sprintf("Layer %d", len(m.Layers)+1),
+			Activator: mapping.LayerActivator{Type: "button", Index: 0},
+			Buttons:   make(map[uint8][]mapping.KeyMapping),
+			Axes:      make(map[uint8]mapping.AxisMapping),
+			Hats:      make(map[uint8]mapping.HatMapping),
+		}
+		m.Layers = append(m.Layers, newLayer)
+
+		// Recompile and save
+		flat := mapping.CompileFlatMapping(*m)
+		maps := store.Mappings.Load()
+		if maps != nil {
+			(*maps)[profile] = flat
+			store.Mappings.Store(maps)
+		}
+		if store.ActiveProfile.Load() == profile {
+			store.ActiveMapping.Store(flat)
+		}
+
+		if err := store.SaveProfile(profile); err != nil {
+			http.Error(w, "error saving profile", http.StatusInternalServerError)
+			return
+		}
+
+		// Return the new layer item
+		templates.LayerItem(profile, len(m.Layers)-1, newLayer).Render(r.Context(), w)
+	})
+
+	mux.HandleFunc("PATCH /profiles/{profile}/layers/{index}", func(w http.ResponseWriter, r *http.Request) {
+		profile := r.PathValue("profile")
+		indexStr := r.PathValue("index")
+		index, err := strconv.Atoi(indexStr)
+		if err != nil {
+			http.Error(w, "invalid index", http.StatusBadRequest)
+			return
+		}
+
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		mappings := *store.RawMappings.Load()
+		m, ok := mappings[profile]
+		if !ok {
+			http.Error(w, "profile not found", http.StatusNotFound)
+			return
+		}
+
+		if m.Layers == nil || index < 0 || index >= len(m.Layers) {
+			http.Error(w, "layer not found", http.StatusNotFound)
+			return
+		}
+
+		layer := &m.Layers[index]
+
+		// Update layer fields
+		if name := r.FormValue(fmt.Sprintf("layer_%d_name", index)); name != "" {
+			layer.Name = name
+		}
+		if activatorType := r.FormValue(fmt.Sprintf("layer_%d_activator_type", index)); activatorType != "" {
+			layer.Activator.Type = activatorType
+		}
+		if activatorIndexStr := r.FormValue(fmt.Sprintf("layer_%d_activator_index", index)); activatorIndexStr != "" {
+			if idx, err := strconv.Atoi(activatorIndexStr); err == nil {
+				layer.Activator.Index = uint8(idx)
+			}
+		}
+		if activatorDir := r.FormValue(fmt.Sprintf("layer_%d_activator_direction", index)); activatorDir != "" {
+			layer.Activator.Direction = activatorDir
+		}
+
+		// Recompile and save
+		flat := mapping.CompileFlatMapping(*m)
+		maps := store.Mappings.Load()
+		if maps != nil {
+			(*maps)[profile] = flat
+			store.Mappings.Store(maps)
+		}
+		if store.ActiveProfile.Load() == profile {
+			store.ActiveMapping.Store(flat)
+		}
+
+		if err := store.SaveProfile(profile); err != nil {
+			http.Error(w, "error saving profile", http.StatusInternalServerError)
+			return
+		}
+
+		// Return updated layer item
+		templates.LayerItem(profile, index, *layer).Render(r.Context(), w)
+	})
+
+	mux.HandleFunc("DELETE /profiles/{profile}/layers/{index}", func(w http.ResponseWriter, r *http.Request) {
+		profile := r.PathValue("profile")
+		indexStr := r.PathValue("index")
+		index, err := strconv.Atoi(indexStr)
+		if err != nil {
+			http.Error(w, "invalid index", http.StatusBadRequest)
+			return
+		}
+
+		mappings := *store.RawMappings.Load()
+		m, ok := mappings[profile]
+		if !ok {
+			http.Error(w, "profile not found", http.StatusNotFound)
+			return
+		}
+
+		if m.Layers == nil || index < 0 || index >= len(m.Layers) {
+			http.Error(w, "layer not found", http.StatusNotFound)
+			return
+		}
+
+		// Remove layer
+		m.Layers = append(m.Layers[:index], m.Layers[index+1:]...)
+
+		// Recompile and save
+		flat := mapping.CompileFlatMapping(*m)
+		maps := store.Mappings.Load()
+		if maps != nil {
+			(*maps)[profile] = flat
+			store.Mappings.Store(maps)
+		}
+		if store.ActiveProfile.Load() == profile {
+			store.ActiveMapping.Store(flat)
+		}
+
+		if err := store.SaveProfile(profile); err != nil {
+			http.Error(w, "error saving profile", http.StatusInternalServerError)
+			return
+		}
+
+		// Return empty string so htmx removes the element with outerHTML swap
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(""))
 	})
 
 	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
@@ -390,7 +592,7 @@ func RunServer(ctx context.Context, port int, store *mapping.Store, reader *inpu
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			templates.Editor(*m, selectedProfile, device, metadata).Render(r.Context(), w)
+			templates.Editor(*m, selectedProfile, device, metadata, false, "").Render(r.Context(), w)
 		} else {
 			templates.EditorDefault(false).Render(r.Context(), w)
 		}

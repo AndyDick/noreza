@@ -1,7 +1,9 @@
 package templates
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"github.com/caedis/noreza/internal/mapping"
 )
 
@@ -15,15 +17,34 @@ templ EditorDefault(isSwap bool) {
 	}
 }
 
-templ Editor(m mapping.Mapping, profile, device string, metadata mapping.Metadata) {
+templ Editor(m mapping.Mapping, profile, device string, metadata mapping.Metadata, layerModeOn bool, selectedLayerName string) {
 	<script>
 		var joystick_size = 248
 		var deadzone = {{ m.AxisDeadzone }}
 		var deadzone_size = Math.floor(deadzone / joystick_size)
 	</script>
-	<div class="flex min-h-screen flex-col items-center justify-center bg-gray-900 text-white">
+	<div class="flex min-h-screen flex-col items-center justify-center bg-gray-900 text-white" x-data={ func() string {
+		layerNames := make([]string, 0)
+		defaultLayer := `""`
+		if len(m.Layers) > 0 {
+			if selectedLayerName != "" {
+				defaultLayer = fmt.Sprintf(`"%s"`, selectedLayerName)
+			} else {
+				defaultLayer = fmt.Sprintf(`"%s"`, m.Layers[0].Name)
+			}
+			for _, l := range m.Layers {
+				layerNames = append(layerNames, l.Name)
+			}
+		}
+		layersJson, _ := json.Marshal(layerNames)
+		layerModeStr := "false"
+		if layerModeOn {
+			layerModeStr = "true"
+		}
+		return fmt.Sprintf(`{layerMode: %s, selectedLayer: %s, layers: %s}`, layerModeStr, defaultLayer, string(layersJson))
+	}() }>
 		<span class="text-3xl mb-4">{ profile }</span>
-		<div class="flex-row">
+		<div class="flex-row items-center">
 			<button
 				class="ml-3 bg-gray-500 hover:bg-gray-600 rounded-md px-4 py-1"
 				hx-patch={ fmt.Sprintf("/profiles/%s/clear", profile) }
@@ -36,6 +57,21 @@ templ Editor(m mapping.Mapping, profile, device string, metadata mapping.Metadat
 				hx-target="#modal-wrapper"
 				hx-swap="innerHTML"
 			>Settings</button>
+			<button
+				class="ml-3 rounded-md px-4 py-1"
+				x-bind:class="layerMode ? 'bg-purple-600 hover:bg-purple-700' : 'bg-gray-500 hover:bg-gray-600'"
+				x-on:click="layerMode = !layerMode"
+				x-text="layerMode ? 'Layer Mode: ON' : 'Layer Mode: OFF'"
+			></button>
+			<select
+				x-show="layerMode && layers.length > 0"
+				class="ml-3 bg-gray-600 text-white px-2 py-1 rounded"
+				x-model="selectedLayer"
+			>
+				for _, layer := range m.Layers {
+					<option value={ layer.Name }>{ layer.Name }</option>
+				}
+			</select>
 		</div>
 		<div
 			class="mt-12"
@@ -65,104 +101,160 @@ templ Editor(m mapping.Mapping, profile, device string, metadata mapping.Metadat
 	</div>
 }
 
-templ EditorModal(profile string, index uint8, mappingType, subkey, keyString string) {
-	<div class="fixed inset-0 flex items-center justify-center bg-black/50">
-		<div
-			x-data={ fmt.Sprintf(`{
-				keys: %s,
-				capturing: false,
-				keyHandler: null,
-				startCapture() { this.capturing = true },
-				stopCapture() { this.capturing = false },
-				addKey(k, mode) {
-					if (!this.keys.some(v => v.code === k.code && v.mode === k.mode)) {
-						this.keys.push(k);
-					}
-				},
-				removeKey(i) { this.keys.splice(i,1) },
-				submit() {
-					htmx.ajax('PATCH', '/profiles/%s/update', {
-						values: {
-							type: '%s',
-							subkey: '%s',
-							index: %d,
-							updateKeys: JSON.stringify(this.keys),
-						},
-						target: "#editor"
-					});
-					document.getElementById('modal-wrapper').close();
-				},
-				cleanup() {
-					if (this.keyHandler) {
-						window.removeEventListener('keydown', this.keyHandler);
-						this.keyHandler = null;
-					}
-					this.capturing = false;
+templ EditorModal(profile string, index uint8, mappingType, subkey, keyString, layerActivatorName string) {
+	<div
+		x-data={ func() string {
+			// Extract layer info from mappingType (e.g., "layer_button:Lower" -> layerMode=true, selectedLayer="Lower")
+			layerMode := "false"
+			selectedLayer := ""
+			if strings.HasPrefix(mappingType, "layer_") {
+				layerMode = "true"
+				if parts := strings.Split(mappingType, ":"); len(parts) > 1 {
+					selectedLayer = parts[1]
 				}
-			}`, keyString, profile, mappingType, subkey, index) }
-			x-init="
-				const component = $data; // Alpine component
-				component.keyHandler = (e) => {
-					if (component.capturing) {
-						e.preventDefault();
-						component.addKey({ code: e.code, mode: 0 });
-					}
-				};
-				window.addEventListener('keydown', component.keyHandler);
+			}
+			return fmt.Sprintf(`{
+			keys: %s,
+			capturing: false,
+			keyHandler: null,
+			layerMode: %s,
+			selectedLayer: '%s',
+			startCapture() { this.capturing = true },
+			stopCapture() { this.capturing = false },
+			addKey(k, mode) {
+				if (!this.keys.some(v => v.code === k.code && v.mode === k.mode)) {
+					this.keys.push(k);
+				}
+			},
+			removeKey(i) { this.keys.splice(i,1) },
+			submit() {
+				htmx.ajax('PATCH', '/profiles/%s/update', {
+					values: {
+						type: '%s',
+						subkey: '%s',
+						index: %d,
+						updateKeys: JSON.stringify(this.keys),
+						layerMode: this.layerMode,
+						selectedLayer: this.selectedLayer,
+					},
+					target: "#editor"
+				});
+				document.getElementById('modal-wrapper').close();
+			},
+			closeModal() {
+				this.cleanup();
+				document.getElementById('modal-wrapper').close();
+			},
+			cleanup() {
+				if (this.keyHandler) {
+					window.removeEventListener('keydown', this.keyHandler);
+					this.keyHandler = null;
+				}
+				this.capturing = false;
+			}
+		}`, keyString, layerMode, selectedLayer, profile, mappingType, subkey, index)
+		}() }
+		x-init="
+			const component = $data;
+			component.keyHandler = (e) => {
+				if (e.key === 'Escape' && !component.capturing) {
+					e.preventDefault();
+					component.closeModal();
+					return;
+				}
+				if (component.capturing) {
+					e.preventDefault();
+					component.addKey({ code: e.code, mode: 0 });
+				}
+			};
+			window.addEventListener('keydown', component.keyHandler);
 
-				const modal = document.getElementById('modal-wrapper');
-				modal.addEventListener('close', () => component.cleanup());
-    		"
+			const modal = document.getElementById('modal-wrapper');
+			modal.addEventListener('close', () => component.cleanup());
+		"
+		class="fixed inset-0 flex items-center justify-center bg-black/50"
+		@click.self="closeModal()"
+	>
+		<div
 			class="relative bg-gray-800 p-6 text-center text-white w-96 rounded-lg shadow-lg"
 		>
 			<p class="text-xl mb-2 text-gray-400">
 				Remapping { mappingType } #{ index + 1 }
 			</p>
-			<!-- Capture box -->
-			<div class="mb-1">
-				<div
-					class="w-28 mx-auto flex items-center justify-center border-2 rounded-lg cursor-pointer select-none transition
-						   border-gray-600 hover:border-purple-500"
-					x-bind:class="capturing ? 'bg-purple-600 border-purple-500' : 'bg-gray-700'"
-					@click="capturing = !capturing"
-				>
-					<span class="text-sm" x-text="capturing ? 'Capturing...' : 'Click to bind'"></span>
+			if layerActivatorName != "" {
+				<div class="mb-6 p-4 bg-amber-500 border-2 border-amber-300 rounded-lg text-black font-semibold">
+					This input is the layer activator for "{ layerActivatorName }"
+					<p class="text-sm font-normal mt-2">Change the layer activator in Settings to rebind this input.</p>
 				</div>
-			</div>
-			<!-- Selected keys -->
-			<div class="flex flex-wrap justify-center gap-2 mb-4">
-				<template x-for="(k, i) in keys" :key="i">
-					<div class="ml-1 flex items-center bg-purple-700 p-1 rounded">
-						<button class="text-sm text-white hover:text-red-500" x-text="k.code" @click="removeKey(i)"></button>
+			} else {
+				<!-- Capture box -->
+				<div class="mb-1">
+					<div
+						class="w-28 mx-auto flex items-center justify-center border-2 rounded-lg cursor-pointer select-none transition
+							   border-gray-600 hover:border-purple-500"
+						x-bind:class="capturing ? 'bg-purple-600 border-purple-500' : 'bg-gray-700'"
+						@click="capturing = !capturing"
+					>
+						<span class="text-sm" x-text="capturing ? 'Capturing...' : 'Click to bind'"></span>
 					</div>
-				</template>
-			</div>
-			<!-- Mouse buttons -->
-			<div class="flex justify-center gap-3 mb-4 mt-2">
-				<button
-					class="text-xs px-4 py-2 bg-purple-500 rounded hover:bg-purple-600"
-					@click="addKey({ code: 'LClick', mode: 1 })"
-				>Left Click</button>
-				<button
-					class="text-xs px-4 py-2 bg-purple-500 rounded hover:bg-purple-600"
-					@click="addKey({ code: 'MClick', mode: 1 })"
-				>Middle Click</button>
-				<button
-					class="text-xs px-4 py-2 bg-purple-500 rounded hover:bg-purple-600"
-					@click="addKey({ code: 'RClick', mode: 1 })"
-				>Right Click</button>
-			</div>
-			<!-- Control buttons -->
-			<div class="flex justify-center gap-1">
-				<button
-					class="px-4 py-1 bg-blue-500 rounded hover:bg-blue-600"
-					@click="keys = []"
-				>Clear</button>
-				<button
-					class="px-4 py-1 bg-green-600 rounded hover:bg-green-700"
-					@click="submit()"
-				>Submit</button>
-			</div>
+				</div>
+				<!-- Selected keys -->
+				<div class="flex flex-wrap justify-center gap-2 mb-4">
+					<template x-for="(k, i) in keys" :key="i">
+						<div class="ml-1 flex items-center bg-purple-700 p-1 rounded">
+							<button class="text-sm text-white hover:text-red-500" x-text="k.code" @click="removeKey(i)"></button>
+						</div>
+					</template>
+				</div>
+				<!-- Mouse buttons -->
+				<div class="flex justify-center gap-3 mb-2 mt-2">
+					<button
+						class="text-xs px-4 py-2 bg-purple-500 rounded hover:bg-purple-600"
+						@click="addKey({ code: 'LClick', mode: 1 })"
+					>Left Click</button>
+					<button
+						class="text-xs px-4 py-2 bg-purple-500 rounded hover:bg-purple-600"
+						@click="addKey({ code: 'MClick', mode: 1 })"
+					>Middle Click</button>
+					<button
+						class="text-xs px-4 py-2 bg-purple-500 rounded hover:bg-purple-600"
+						@click="addKey({ code: 'RClick', mode: 1 })"
+					>Right Click</button>
+				</div>
+				<!-- Scroll wheel buttons -->
+				<div class="flex justify-center gap-3 mb-2">
+					<button
+						class="text-xs px-4 py-2 bg-purple-500 rounded hover:bg-purple-600"
+						@click="addKey({ code: 'ScrollUp', mode: 1 })"
+					>Scroll Up</button>
+					<button
+						class="text-xs px-4 py-2 bg-purple-500 rounded hover:bg-purple-600"
+						@click="addKey({ code: 'ScrollDown', mode: 1 })"
+					>Scroll Down</button>
+				</div>
+				<!-- Back/Forward buttons -->
+				<div class="flex justify-center gap-3 mb-4">
+					<button
+						class="text-xs px-4 py-2 bg-purple-500 rounded hover:bg-purple-600"
+						@click="addKey({ code: 'Back', mode: 1 })"
+					>Back</button>
+					<button
+						class="text-xs px-4 py-2 bg-purple-500 rounded hover:bg-purple-600"
+						@click="addKey({ code: 'Forward', mode: 1 })"
+					>Forward</button>
+				</div>
+				<!-- Control buttons -->
+				<div class="flex justify-center gap-1">
+					<button
+						class="px-4 py-1 bg-blue-500 rounded hover:bg-blue-600"
+						@click="keys = []"
+					>Clear</button>
+					<button
+						class="px-4 py-1 bg-green-600 rounded hover:bg-green-700"
+						@click="submit()"
+					>Submit</button>
+				</div>
+			}
 			<!-- Close button -->
 			<button
 				class="absolute top-1 right-1 text-xs p-1 text-gray-500 hover:text-gray-300 font-bold"
@@ -183,18 +275,25 @@ templ EditorModal(profile string, index uint8, mappingType, subkey, keyString st
 templ MappingButton(index uint8, m mapping.Mapping, row, col int, profile string) {
 	<button
 		data-key={ fmt.Sprintf("button-%d", index-1) }
+		data-btn-index={ fmt.Sprintf("%d", index-1) }
 		class="flex items-center justify-center rounded-lg bg-purple-700 relative h-18 w-18 cursor-pointer hover:bg-purple-600 text-xs whitespace-pre-line overflow-y-scroll"
 		style={ fmt.Sprintf("grid-column-start: %d; grid-row-start:%d;", col, row) }
 		hx-get={ fmt.Sprintf("/profiles/%s/update", profile) }
 		hx-target="#modal-wrapper"
 		hx-swap="innerHTML"
-		hx-vals={ templ.JSONString(map[string]any{
-			"type":    "button",
-			"index":   index - 1,
-		}) }
+		hx-vals="js:{type: (function(el) { var d = Alpine.$data(el); return d.layerMode ? 'layer_button:' + d.selectedLayer : 'button'; })(this), index: parseInt(this.dataset.btnIndex)}"
 	>
-		if key, ok := m.Buttons[index-1]; ok {
-			{ concatKeys(key) }
+		<span x-show="!layerMode">
+			if key, ok := m.Buttons[index-1]; ok {
+				{ concatKeys(key) }
+			}
+		</span>
+		for _, layer := range m.Layers {
+			<span x-show={ fmt.Sprintf("layerMode && selectedLayer === '%s'", layer.Name) }>
+				if key, ok := layer.Buttons[index-1]; ok {
+					{ concatKeys(key) }
+				}
+			</span>
 		}
 		<span class="absolute bottom-1 left-1 text-[8px] font-bold ml-0.5">#{ index }</span>
 	</button>
@@ -207,11 +306,18 @@ templ DirectionButton(dir string, label string, hxVals map[string]any, keyLabel,
 		} else {
 			data-key={ fmt.Sprintf("%s-%d-%s", hxVals["type"], hxVals["index"], hxVals["subkey"]) }
 		}
-		class={ fmt.Sprintf("absolute %s w-18 h-18 bg-purple-700 hover:bg-purple-800 flex items-center justify-center rounded-lg text-xs whitespace-pre-line overflow-y-scroll", dir) }
+		data-base-type={ hxVals["type"].(string) }
+		data-index={ fmt.Sprintf("%v", hxVals["index"]) }
+		if hxVals["subkey"] != nil {
+			data-subkey={ hxVals["subkey"].(string) }
+			hx-vals={ fmt.Sprintf("js:{type: (function(el) { var d = Alpine.$data(el); return d.layerMode ? 'layer_%s:' + d.selectedLayer : '%s'; })(this), index: %v, subkey: '%s'}", hxVals["type"], hxVals["type"], hxVals["index"], hxVals["subkey"]) }
+		} else {
+			hx-vals={ fmt.Sprintf("js:{type: (function(el) { var d = Alpine.$data(el); return d.layerMode ? 'layer_%s:' + d.selectedLayer : '%s'; })(this), index: %v}", hxVals["type"], hxVals["type"], hxVals["index"]) }
+		}
+		class={ fmt.Sprintf("absolute %s w-18 h-18 bg-purple-700 hover:bg-purple-800 flex items-center justify-center rounded-lg text-xs whitespace-pre-line overflow-y-scroll cursor-pointer", dir) }
 		hx-get={ fmt.Sprintf("/profiles/%s/update", profile) }
 		hx-target="#modal-wrapper"
 		hx-swap="innerHTML"
-		hx-vals={ templ.JSONString(hxVals) }
 	>
 		{ keyLabel }
 		<span class="absolute bottom-1 left-1 text-[8px] font-bold ml-0.5">{ label }</span>
@@ -405,7 +511,7 @@ templ cyborg2(m mapping.Mapping, profile string, isOppositeHand bool) {
 templ cyro(m mapping.Mapping, profile string) {
 	<div class="grid grid-cols-8 grid-rows-6 gap-4">
 		@Hat(0, m, 1, 1, profile, 17)
-		@Joystick(0, 1, m, 4, 1, profile, 18)
+		@Joystick(2, 5, m, 4, 1, profile, 18)
 		@MappingButton(1, m, 3, 4, profile)
 		@MappingButton(2, m, 3, 5, profile)
 		@MappingButton(3, m, 3, 6, profile)
@@ -417,7 +523,6 @@ templ cyro(m mapping.Mapping, profile string) {
 		<div class="col-start-4 row-start-5 flex items-center justify-center ml-3 rounded-lg bg-purple-900 relative h-18 w-12 cursor-not-allowed text-xs whitespace-pre-line overflow-y-scroll">
 			NYI
 		</div>
-		//@MappingButton(1, m, 5, 4, profile)
 		@MappingButton(9, m, 5, 5, profile)
 		@MappingButton(10, m, 5, 6, profile)
 		@MappingButton(11, m, 5, 7, profile)
@@ -451,7 +556,7 @@ templ cyro_lefty(m mapping.Mapping, profile string) {
 		@MappingButton(15, m, 6, 4, profile)
 		@MappingButton(16, m, 4, 5, profile)
 		@Hat(0, m, 1, 6, profile, 17)
-		@Joystick(0, 1, m, 4, 6, profile, 18)
+		@Joystick(2, 5, m, 4, 6, profile, 18)
 	</div>
 }
 

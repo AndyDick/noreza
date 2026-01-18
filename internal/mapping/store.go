@@ -53,16 +53,23 @@ type Store struct {
 	lastHat    map[uint8]int16
 	lastAxis   map[uint8]int8
 	eventSubs  atomic.Pointer[map[*chan SSEEvent]struct{}]
+	// layer state: map of activator ID -> whether layer is active
+	// activator ID format: "button_1" or "hat_0_up"
+	activeLayers map[string]bool
+	// currently pressed keys per layer (for cleanup on layer release)
+	layerPressedKeys map[string][]KeyMapping
 }
 
 func NewStore(profilesPath string, productID uint16) *Store {
 	s := Store{
-		DevicePath:  path.Dir(profilesPath),
-		ProfilePath: profilesPath,
-		activePath:  filepath.Join(profilesPath, "active"),
-		ProductID:   productID,
-		lastHat:     make(map[uint8]int16),
-		lastAxis:    make(map[uint8]int8),
+		DevicePath:       path.Dir(profilesPath),
+		ProfilePath:      profilesPath,
+		activePath:       filepath.Join(profilesPath, "active"),
+		ProductID:        productID,
+		lastHat:          make(map[uint8]int16),
+		lastAxis:         make(map[uint8]int8),
+		activeLayers:     make(map[string]bool),
+		layerPressedKeys: make(map[string][]KeyMapping),
 	}
 
 	s.eventSubs.Store(&map[*chan SSEEvent]struct{}{})
@@ -397,6 +404,15 @@ func (s *Store) setActive(name string) {
 
 	if flat, ok := (*mappingsPtr)[name]; ok {
 		s.ActiveMapping.Store(flat)
+		// Reset layer state when switching profiles
+		// Release all keys from previous layers
+		for layerButton := range s.activeLayers {
+			if layerKeys, ok := s.layerPressedKeys[layerButton]; ok && len(layerKeys) > 0 {
+				// Keys will be released naturally as events come through
+				s.layerPressedKeys[layerButton] = nil
+			}
+			delete(s.activeLayers, layerButton)
+		}
 	} else {
 		s.ActiveMapping.Store(nil)
 	}

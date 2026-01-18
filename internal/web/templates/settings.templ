@@ -3,12 +3,12 @@ package templates
 import "fmt"
 import "github.com/caedis/noreza/internal/mapping"
 
-templ SettingsModal(profile string, deadzone int16, windowProfileCfg mapping.WindowProfileCfg) {
+templ SettingsModal(profile string, deadzone int16, windowProfileCfg mapping.WindowProfileCfg, layers []mapping.LayerMapping) {
 	<div
 		class="fixed inset-0 flex items-center justify-center"
 	>
 		<div
-			class="bg-gray-800 p-3 text-center text-white w-120 relative"
+			class="bg-gray-800 p-3 text-center text-white w-120 relative max-h-[90vh] overflow-y-auto"
 		>
 			<h2 class="text-xl mb-4">Profile Settings</h2>
 			<form
@@ -60,6 +60,20 @@ templ SettingsModal(profile string, deadzone int16, windowProfileCfg mapping.Win
 					</button>
 				</menu>
 			</form>
+			<div class="mt-4 border-t border-gray-600 pt-4">
+				<h3 class="text-lg mb-2">Layers</h3>
+				<div id="layers-list">
+					for i, layer := range layers {
+						@LayerItem(profile, i, layer)
+					}
+				</div>
+				<button
+					class="mt-2 px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded"
+					hx-post={ fmt.Sprintf("/profiles/%s/layers", profile) }
+					hx-target="#layers-list"
+					hx-swap="beforeend"
+				>Add Layer</button>
+			</div>
 			<button
 				class="absolute top-1 right-1 text-xs p-1 text-gray-500 hover:text-gray-600 font-bold"
 				onclick="document.getElementById('modal-wrapper').close()"
@@ -74,6 +88,84 @@ templ SettingsModal(profile string, deadzone int16, windowProfileCfg mapping.Win
 		model.setAttribute("closedby", "closerequest");
 		model.showModal();
 	</script>
+}
+
+templ LayerItem(profile string, index int, layer mapping.LayerMapping) {
+	<div id={ fmt.Sprintf("layer-%d", index) } class="mb-2 p-2 bg-gray-700 rounded border border-gray-600">
+		<div class="flex items-center justify-between mb-2">
+			<input
+				type="text"
+				class="bg-gray-600 text-white px-2 py-1 rounded flex-1 mr-2"
+				name={ fmt.Sprintf("layer_%d_name", index) }
+				value={ layer.Name }
+				placeholder="Layer name"
+				hx-patch={ fmt.Sprintf("/profiles/%s/layers/%d", profile, index) }
+				hx-trigger="change delay:500ms"
+				hx-target={ fmt.Sprintf("#layer-%d", index) }
+				hx-swap="outerHTML"
+				hx-include={ fmt.Sprintf("#layer-%d", index) }
+			/>
+			<button
+				class="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs"
+				hx-delete={ fmt.Sprintf("/profiles/%s/layers/%d", profile, index) }
+				hx-target={ fmt.Sprintf("#layer-%d", index) }
+				hx-swap="outerHTML"
+				hx-confirm="Delete this layer?"
+			>Delete</button>
+		</div>
+		<div class="grid grid-cols-2 gap-2">
+			<div>
+				<label class="block text-xs mb-1">Activator Type</label>
+				<select
+					class="bg-gray-600 text-white px-2 py-1 rounded w-full"
+					name={ fmt.Sprintf("layer_%d_activator_type", index) }
+					hx-patch={ fmt.Sprintf("/profiles/%s/layers/%d", profile, index) }
+					hx-trigger="change"
+					hx-target={ fmt.Sprintf("#layer-%d", index) }
+					hx-swap="outerHTML"
+					hx-include={ fmt.Sprintf("#layer-%d", index) }
+				>
+					<option value="button" selected?={ layer.Activator.Type == "button" }>Button</option>
+					<option value="hat" selected?={ layer.Activator.Type == "hat" }>Hat</option>
+				</select>
+			</div>
+			<div>
+				<label class="block text-xs mb-1">Index</label>
+				<input
+					type="number"
+					class="bg-gray-600 text-white px-2 py-1 rounded w-full"
+					name={ fmt.Sprintf("layer_%d_activator_index", index) }
+					value={ fmt.Sprintf("%d", layer.Activator.Index) }
+					min="0"
+					max="255"
+					hx-patch={ fmt.Sprintf("/profiles/%s/layers/%d", profile, index) }
+					hx-trigger="change delay:500ms"
+					hx-target={ fmt.Sprintf("#layer-%d", index) }
+					hx-swap="outerHTML"
+					hx-include={ fmt.Sprintf("#layer-%d", index) }
+				/>
+			</div>
+		</div>
+		if layer.Activator.Type == "hat" {
+			<div class="mt-2">
+				<label class="block text-xs mb-1">Direction</label>
+				<select
+					class="bg-gray-600 text-white px-2 py-1 rounded w-full"
+					name={ fmt.Sprintf("layer_%d_activator_direction", index) }
+					hx-patch={ fmt.Sprintf("/profiles/%s/layers/%d", profile, index) }
+					hx-trigger="change"
+					hx-target={ fmt.Sprintf("#layer-%d", index) }
+					hx-swap="outerHTML"
+					hx-include={ fmt.Sprintf("#layer-%d", index) }
+				>
+					<option value="up" selected?={ layer.Activator.Direction == "up" }>Up</option>
+					<option value="down" selected?={ layer.Activator.Direction == "down" }>Down</option>
+					<option value="left" selected?={ layer.Activator.Direction == "left" }>Left</option>
+					<option value="right" selected?={ layer.Activator.Direction == "right" }>Right</option>
+				</select>
+			</div>
+		}
+	</div>
 }
 
 templ DeviceSettingsModal(metadata mapping.Metadata) {
