@@ -9,7 +9,7 @@ import (
 	"github.com/caedis/noreza/internal/output"
 )
 
-func RunEventLoop(ctx context.Context, reader *input.Reader, store *mapping.Store, writer *output.Writer) {
+func RunEventLoop(ctx context.Context, reader *input.Reader, store *mapping.Store, writer *output.Writer, latProfiler *LatencyProfiler) {
 	events := make(chan mapping.JoystickEvent, 128)
 	go reader.Stream(events)
 
@@ -26,6 +26,10 @@ func RunEventLoop(ctx context.Context, reader *input.Reader, store *mapping.Stor
 			store.BroadcastEvent(mapping.SSEEvent{Type: mapping.EventJoystick, Data: evt})
 			press, release := store.Resolve(evt)
 			writer.Apply(press, release)
+
+			if latProfiler != nil && evt.Timestamp > 0 {
+				latProfiler.Record(evt.Timestamp)
+			}
 		}
 	}
 }

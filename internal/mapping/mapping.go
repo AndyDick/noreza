@@ -6,10 +6,11 @@ import (
 )
 
 type JoystickEvent struct {
-	Type  string `json:"type"`
-	Index uint8  `json:"index"`
-	Value int16  `json:"value"`
-	Ready bool   `json:"-"`
+	Type      string `json:"type"`
+	Index     uint8  `json:"index"`
+	Value     int16  `json:"value"`
+	Ready     bool   `json:"-"`
+	Timestamp int64  `json:"-"` // nanosecond timestamp for latency profiling
 }
 
 func (j *JoystickEvent) String() string {

@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"strconv"
-	"sync"
 	"syscall"
 	"time"
 
@@ -29,6 +28,7 @@ var quiet = flag.Bool("quiet", false, "disable logging")
 var wait = flag.Bool("wait", false, "wait for device to connect instead of exiting if not found")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
 var memprofile = flag.String("memprofile", "", "write memory profile to `file`")
+var latprofile = flag.String("latprofile", "", "write input-to-output latency profile to `file`")
 
 func main() {
 	flag.Parse()
@@ -111,7 +111,7 @@ func main() {
 	go store.WatchProfiles(ctx)
 
 	metadata := store.Metadata.Load()
-	reader, err := input.NewReader(devicePath, metadata.InvertAxes)
+	reader, err := input.NewReader(devicePath, metadata.InvertAxes, *latprofile != "")
 	if err != nil {
 		log.Fatalf("failed to start reader: %v", err)
 	}
@@ -131,8 +131,13 @@ func main() {
 		}
 		go switcher.Start(ctx)
 	}
+	var latProfiler *internal.LatencyProfiler
+	if *latprofile != "" {
+		latProfiler = internal.NewLatencyProfiler()
+	}
+
 	go web.RunServer(ctx, *port, store, reader, deviceIdentifier)
-	go internal.RunEventLoop(ctx, reader, store, writer)
+	go internal.RunEventLoop(ctx, reader, store, writer, latProfiler)
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs,
@@ -141,28 +146,29 @@ func main() {
 		syscall.SIGHUP,
 	)
 
-	var mu sync.Mutex
 	go func() {
 		sig := <-sigs
 		log.Printf("[signal] caught %s, shutting down...", sig)
 		cancel()
-
-		mu.Lock()
-		defer mu.Unlock()
-
-		if reader != nil {
-			reader.Close()
-		}
-
-		if writer != nil {
-			writer.Close()
-		}
-
-		os.Exit(0)
 	}()
 
 	log.Println("[daemon] started. press Ctrl+C to stop.")
 	<-ctx.Done()
+
+	if reader != nil {
+		reader.Close()
+	}
+	if writer != nil {
+		writer.Close()
+	}
+
+	if *latprofile != "" && latProfiler != nil {
+		if err := latProfiler.WriteToFile(*latprofile); err != nil {
+			log.Printf("could not write latency profile: %v", err)
+		} else {
+			log.Printf("latency profile written to %s", *latprofile)
+		}
+	}
 
 	if *memprofile != "" {
 		f, err := os.Create(*memprofile)

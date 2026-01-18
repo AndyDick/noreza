@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/caedis/noreza/internal/mapping"
 	"github.com/holoplot/go-evdev"
@@ -14,18 +15,20 @@ import (
 )
 
 type Reader struct {
-	dev *evdev.InputDevice
-	invertAxes  bool
+	dev               *evdev.InputDevice
+	invertAxes        bool
+	captureTimestamps bool
 }
 
-func NewReader(path string, invert_axes bool) (*Reader, error) {
+func NewReader(path string, invert_axes bool, captureTimestamps bool) (*Reader, error) {
 	dev, err := evdev.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	return &Reader{
-		dev: dev,
-		invertAxes: invert_axes,
+		dev:               dev,
+		invertAxes:        invert_axes,
+		captureTimestamps: captureTimestamps,
 	}, nil
 }
 
@@ -57,9 +60,13 @@ func (r *Reader) Stream(out chan<- mapping.JoystickEvent) {
 			return
 		}
 
+		var ts int64
+		if r.captureTimestamps {
+			ts = time.Now().UnixNano()
+		}
 		switch evt.Type {
 		case evdev.EV_KEY:
-			out <- mapping.JoystickEvent{Type: "button", Index: keyMap[evt.Code], Value: int16(evt.Value), Ready: true}
+			out <- mapping.JoystickEvent{Type: "button", Index: keyMap[evt.Code], Value: int16(evt.Value), Ready: true, Timestamp: ts}
 		case evdev.EV_ABS:
 			switch evt.Code {
 			case evdev.ABS_HAT0X:
@@ -81,12 +88,12 @@ func (r *Reader) Stream(out chan<- mapping.JoystickEvent) {
 						value = 4
 					}
 				}
-				out <- mapping.JoystickEvent{Type: "hat", Index: 0, Value: value, Ready: true}
+				out <- mapping.JoystickEvent{Type: "hat", Index: 0, Value: value, Ready: true, Timestamp: ts}
 			default:
 				if absInfo, ok := absInfos[evt.Code]; ok {
 					scaled := scaleAxisToInt16(evt.Value, absInfo.Minimum, absInfo.Maximum)
 					scaled = scaled * invertScale
-					out <- mapping.JoystickEvent{Type: "axis", Index: uint8(evt.Code), Value: scaled, Ready: true}
+					out <- mapping.JoystickEvent{Type: "axis", Index: uint8(evt.Code), Value: scaled, Ready: true, Timestamp: ts}
 				}
 			}
 		}
