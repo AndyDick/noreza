@@ -156,7 +156,7 @@ var Cyborg2Layout = []Control{
 
 var CyroLayout = []Control{
 	HatControl{ButtonControl: ButtonControl{Row: 1, Col: 1, Index: 0}, CenterButtonIndex: 17},
-	JoystickControl{ButtonControl: ButtonControl{Row: 4, Col: 1, Index: 0}, YIndex: 1, CenterButtonIndex: 18},
+	JoystickControl{ButtonControl: ButtonControl{Row: 4, Col: 1, Index: 5}, YIndex: 2, CenterButtonIndex: 18},
 	ButtonControl{Row: 3, Col: 4, Index: 1},
 	ButtonControl{Row: 3, Col: 5, Index: 2},
 	ButtonControl{Row: 3, Col: 6, Index: 3},
