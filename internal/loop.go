@@ -13,6 +13,11 @@ func RunEventLoop(ctx context.Context, reader *input.Reader, store *mapping.Stor
 	events := make(chan mapping.JoystickEvent, 128)
 	go reader.Stream(events)
 
+	// Start scroll wheel ticker for smooth continuous scrolling
+	store.StartScrollTicker(ctx, func(keys []mapping.KeyMapping) {
+		writer.Apply(keys, nil)
+	})
+
 	for {
 		select {
 		case <-ctx.Done():

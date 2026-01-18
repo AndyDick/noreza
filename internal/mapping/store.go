@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -58,6 +59,9 @@ type Store struct {
 	activeLayers map[string]bool
 	// currently pressed keys per layer (for cleanup on layer release)
 	layerPressedKeys map[string][]KeyMapping
+	// scroll wheel state: axis -> keys to emit (nil if not scrolling)
+	scrollActive   map[uint8][]KeyMapping
+	scrollCallback func([]KeyMapping)
 }
 
 func NewStore(profilesPath string, productID uint16) *Store {
@@ -70,11 +74,40 @@ func NewStore(profilesPath string, productID uint16) *Store {
 		lastAxis:         make(map[uint8]int8),
 		activeLayers:     make(map[string]bool),
 		layerPressedKeys: make(map[string][]KeyMapping),
+		scrollActive:     make(map[uint8][]KeyMapping),
 	}
 
 	s.eventSubs.Store(&map[*chan SSEEvent]struct{}{})
 
 	return &s
+}
+
+func (s *Store) StartScrollTicker(ctx context.Context, callback func([]KeyMapping)) {
+	s.scrollCallback = callback
+	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				for _, keys := range s.scrollActive {
+					if len(keys) > 0 {
+						callback(keys)
+					}
+				}
+			}
+		}
+	}()
+}
+
+func (s *Store) SetScrollActive(axis uint8, keys []KeyMapping) {
+	if len(keys) == 0 {
+		delete(s.scrollActive, axis)
+	} else {
+		s.scrollActive[axis] = keys
+	}
 }
 
 func (s *Store) ListProfiles() []Profile {
