@@ -1,4 +1,8 @@
 # Noreza configuration
-# Copy this file to /etc/noreza.conf and update with your device serial
+# Copy this file to /etc/noreza.conf and update with your settings
 
 NOREZA_SERIAL=YOUR_SERIAL_HERE
+
+# Path to config directory containing your profiles
+# (typically your user's ~/.config directory)
+XDG_CONFIG_HOME=/home/YOUR_USERNAME/.config

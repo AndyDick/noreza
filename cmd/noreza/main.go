@@ -92,6 +92,7 @@ func main() {
 	}
 
 	profilesPath := paths.ProfilesDir(deviceIdentifier)
+	log.Printf("Using config directory: %s", paths.ConfigDir())
 	if err := os.MkdirAll(profilesPath, 0755); err != nil {
 		log.Fatalf("error creating profile directory: %v", err)
 	}
