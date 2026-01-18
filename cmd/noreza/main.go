@@ -123,6 +123,8 @@ func main() {
 
 	if _, found := os.LookupEnv("WAYLAND_DISPLAY"); found {
 		log.Println("Active window watching disabled on wayland")
+	} else if _, found := os.LookupEnv("DISPLAY"); !found {
+		log.Println("Active window watching disabled (no DISPLAY set)")
 	} else {
 		log.Println("Watching active windows")
 		switcher, err := mapping.NewAutoProfileSwitcher(store, 300*time.Millisecond)
